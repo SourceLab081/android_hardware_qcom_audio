@@ -33,6 +33,11 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
+ * Changes from Qualcomm Innovation Center are provided under the following license:
+ * Copyright (c) 2024 Qualcomm Innovation Center, Inc. All rights reserved.
+ * SPDX-License-Identifier: BSD-3-Clause-Clear
+ *
  */
 
 #define LOG_TAG "audio_hw_primary"
@@ -1380,6 +1385,7 @@ int enable_snd_device(struct audio_device *adev,
          audio_extn_spkr_prot_calib_cancel(adev);
 
     audio_extn_dsm_feedback_enable(adev, snd_device, true);
+    amplifier_enable_devices(snd_device, true);
 
     if (platform_can_enable_spkr_prot_on_device(snd_device) &&
          audio_extn_spkr_prot_is_enabled()) {
@@ -1387,7 +1393,6 @@ int enable_snd_device(struct audio_device *adev,
             goto err;
         }
         audio_extn_dev_arbi_acquire(snd_device);
-        amplifier_enable_devices(snd_device, true);
         if (audio_extn_spkr_prot_start_processing(snd_device)) {
             ALOGE("%s: spkr_start_processing failed", __func__);
             audio_extn_dev_arbi_release(snd_device);
@@ -1521,6 +1526,7 @@ int disable_snd_device(struct audio_device *adev,
         ALOGD("%s: snd_device(%d: %s)", __func__, snd_device, device_name);
 
         audio_extn_dsm_feedback_enable(adev, snd_device, false);
+        amplifier_enable_devices(snd_device, false);
 
         if (platform_can_enable_spkr_prot_on_device(snd_device) &&
              audio_extn_spkr_prot_is_enabled()) {
@@ -1539,7 +1545,6 @@ int disable_snd_device(struct audio_device *adev,
             platform_set_speaker_gain_in_combo(adev, snd_device, false);
         } else {
             audio_route_reset_and_update_path(adev->audio_route, device_name);
-            amplifier_enable_devices(snd_device, false);
         }
 
         if (snd_device == SND_DEVICE_OUT_BT_A2DP) {
@@ -3320,7 +3325,8 @@ int start_input_stream(struct stream_in *in)
             in->pcm = NULL;
             goto error_open;
         }
-        register_in_stream(in);
+        if (in->flags  & (AUDIO_INPUT_FLAG_FAST | AUDIO_INPUT_FLAG_RAW))
+            register_in_stream(in);
         if (in->realtime) {
             ATRACE_BEGIN("pcm_in_start");
             ret = pcm_start(in->pcm);
@@ -4174,7 +4180,8 @@ int start_output_stream(struct stream_out *out)
     }
 
     if (ret == 0) {
-        register_out_stream(out);
+        if (out->flags & (AUDIO_OUTPUT_FLAG_FAST | AUDIO_OUTPUT_FLAG_RAW))
+            register_out_stream(out);
         if (out->realtime) {
             if (out->pcm == NULL || !pcm_is_ready(out->pcm)) {
                 ALOGE("%s: pcm stream not ready", __func__);
@@ -9201,6 +9208,19 @@ static int adev_set_mode(struct audio_hw_device *dev, audio_mode_t mode)
     return 0;
 }
 
+static bool adev_set_mic_mute_mmap_hash_cb(void *key __unused, void *value,
+                                           void *context) {
+   struct audio_device *adev = (struct audio_device *)context;
+   struct audio_stream_info *s_info = (struct audio_stream_info *)value;
+   struct audio_stream *stream = s_info->stream;
+
+   /* check whether the stream is input */
+   if (stream && stream->dump == in_dump)
+       in_set_gain((struct audio_stream_in *)stream, adev->mic_muted ? 0.f : 1.f);
+
+   return true;
+}
+
 static int adev_set_mic_mute(struct audio_hw_device *dev, bool state)
 {
     int ret;
@@ -9214,6 +9234,8 @@ static int adev_set_mic_mute(struct audio_hw_device *dev, bool state)
         ret = audio_extn_ext_hw_plugin_set_mic_mute(adev->ext_hw_plugin, state);
 
     adev->mic_muted = state;
+    /* run mmap streams mute handler */
+    hashmapForEach(adev->io_streams_map, adev_set_mic_mute_mmap_hash_cb, adev);
     pthread_mutex_unlock(&adev->lock);
 
     return ret;
@@ -9833,7 +9855,7 @@ static void adev_close_input_stream(struct audio_hw_device *dev,
     }
 
     if (audio_extn_compr_cap_enabled() &&
-            audio_extn_compr_cap_format_supported(pcm_format_to_audio_format(in->config.format)))
+            audio_extn_compr_cap_format_supported(pcm_format_to_audio_format((in->config).format)))
         audio_extn_compr_cap_deinit();
 
     if (audio_extn_cin_attached_usecase(in))
