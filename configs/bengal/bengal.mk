@@ -103,7 +103,9 @@ PRODUCT_PACKAGES += $(AUDIO_HARDWARE)
 PRODUCT_PACKAGES += $(AUDIO_WRAPPER)
 PRODUCT_PACKAGES += $(AUDIO_HAL_TEST_APPS)
 
-ifeq ($(AUDIO_FEATURE_ENABLED_DLKM),true)
+USING_MODULES := false
+
+ifeq ($(USING_MODULES),true)
 BOARD_VENDOR_KERNEL_MODULES += \
     $(KERNEL_MODULES_OUT)/audio_apr.ko \
     $(KERNEL_MODULES_OUT)/audio_q6_pdr.ko \
@@ -132,7 +134,6 @@ BOARD_VENDOR_KERNEL_MODULES += \
     $(KERNEL_MODULES_OUT)/audio_tx_macro.ko \
     $(KERNEL_MODULES_OUT)/audio_machine_bengal.ko \
     $(KERNEL_MODULES_OUT)/audio_snd_event.ko
-endif
 
 #Audio DLKM
 AUDIO_DLKM := audio_apr.ko
@@ -161,6 +162,9 @@ AUDIO_DLKM += audio_machine_bengal.ko
 AUDIO_DLKM += audio_snd_event.ko
 
 PRODUCT_PACKAGES += $(AUDIO_DLKM)
+
+endif
+
 
 ifneq ($(strip $(TARGET_USES_RRO)), true)
 #Audio Specific device overlays
